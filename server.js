@@ -83,4 +83,5 @@ io.on('connection',socket=>{
  socket.on('disconnect',()=>{const r=rooms.get(socket.data.room),p=r?.players.get(socket.data.player);if(!p||p.socket!==socket.id)return;p.connected=false;if(r.phase==='lobby'){r.players.delete(p.id);if(r.host===p.id)r.host=r.players.keys().next().value||null;if(!r.players.size){stop(r);rooms.delete(r.code);return}}emit(r)})
 });
 setInterval(()=>{for(const [c,r] of rooms){if(r.phase==='finished'&&!r.players.size){stop(r);rooms.delete(c)}}},600000).unref();
+require('./poker').attach(io);
 server.listen(process.env.PORT||3000,'0.0.0.0',()=>console.log('MIND BATTLE running on port '+(process.env.PORT||3000)));
