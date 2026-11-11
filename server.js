@@ -84,4 +84,6 @@ io.on('connection',socket=>{
 });
 setInterval(()=>{for(const [c,r] of rooms){if(r.phase==='finished'&&!r.players.size){stop(r);rooms.delete(c)}}},600000).unref();
 require('./poker').attach(io);
+require('./fighting').attach(io);
+require('./fighting').attach(io);
 server.listen(process.env.PORT||3000,'0.0.0.0',()=>console.log('MIND BATTLE running on port '+(process.env.PORT||3000)));
