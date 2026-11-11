@@ -15,18 +15,18 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const cleanName = v => typeof v === 'string' ? v.trim().slice(0, 18).replace(/[<>]/g, '') || 'Боец' : 'Боец';
 const makePlayer = (id, index, name) => ({
   id, index, name, x: index === 0 ? 225 : 735, hp: 100, facing: index === 0 ? 1 : -1,
-  action: 'idle', actionUntil: 0, cooldownUntil: 0, hitDone: false,
+  action: 'idle', actionUntil: 0, actionStart: 0, actionDuration: 0, cooldownUntil: 0, hitDone: false, hitSerial: 0,
   input: { left: false, right: false, block: false }, ready: false, wins: 0
 });
 function publicState(room) {
   return { code: room.code, phase: room.phase, seconds: room.seconds, winner: room.winner,
     players: room.players.map(p => p && ({ index:p.index, name:p.name, x:p.x, hp:p.hp,
-      facing:p.facing, action:p.action, ready:p.ready, wins:p.wins })) };
+      facing:p.facing, action:p.action, actionElapsed:Math.max(0,Date.now()-p.actionStart), actionDuration:p.actionDuration, hitSerial:p.hitSerial, ready:p.ready, wins:p.wins })) };
 }
 function broadcast(room) { io.to(room.code).emit('state', publicState(room)); }
 function resetRound(room) {
   room.players.forEach((p, i) => { p.x = i ? 735 : 225; p.hp = 100; p.facing = i ? -1 : 1;
-    p.action = 'idle'; p.actionUntil = 0; p.cooldownUntil = 0; p.hitDone = false;
+    p.action = 'idle'; p.actionUntil = 0; p.actionStart = 0; p.actionDuration = 0; p.cooldownUntil = 0; p.hitDone = false; p.hitSerial = 0;
     p.input = { left: false, right: false, block: false }; });
   room.phase = 'playing'; room.seconds = 90; room.started = Date.now(); room.winner = null;
 }
@@ -92,9 +92,9 @@ io.on('connection', socket => {
     const room = rooms.get(socket.data.roomCode);
     if (!room || room.phase !== 'playing' || !['punch','kick'].includes(kind)) return;
     const p = room.players.find(p => p.id === socket.id);
-    const now = Date.now(); if (!p || now < p.cooldownUntil || p.hp <= 0) return;
-    p.action = kind; p.actionUntil = now + (kind === 'punch' ? 240 : 380);
-    p.cooldownUntil = now + (kind === 'punch' ? 380 : 620); p.hitDone = false;
+    const now = Date.now(); if (!p || now < p.cooldownUntil || p.hp <= 0 || p.action === 'hurt' || p.action === 'ko') return;
+    p.action = kind; p.actionStart = now; p.actionDuration = kind === 'punch' ? 370 : 560; p.actionUntil = now + p.actionDuration;
+    p.cooldownUntil = now + (kind === 'punch' ? 460 : 700); p.hitDone = false;
   });
   socket.on('disconnect', () => leaveRoom(socket));
 });
@@ -106,7 +106,7 @@ setInterval(() => {
     for (const p of [a,b]) {
       const other = p === a ? b : a;
       p.facing = other.x >= p.x ? 1 : -1;
-      if (now >= p.actionUntil) p.action = p.input.block ? 'block' : 'idle';
+      if (now >= p.actionUntil && p.action !== 'ko') p.action = p.input.block ? 'block' : 'idle';
       if (p.action === 'idle' || p.action === 'walk') {
         const direction = Number(p.input.right) - Number(p.input.left);
         p.x = clamp(p.x + direction * 5, 42, ARENA.width - 42);
@@ -123,11 +123,14 @@ setInterval(() => {
     for (const p of [a,b]) {
       const other = p === a ? b : a;
       if ((p.action !== 'punch' && p.action !== 'kick') || p.hitDone) continue;
-      const reach = p.action === 'punch' ? 105 : 135;
+      const impactDelay = p.action === 'punch' ? 125 : 215;
+      if (now - p.actionStart < impactDelay) continue;
+      const reach = p.action === 'punch' ? 117 : 155;
       if (Math.abs(other.x - p.x) <= reach && (other.x - p.x) * p.facing >= 0) {
         const blocking = other.input.block && other.action === 'block';
         other.hp = clamp(other.hp - (blocking ? 2 : (p.action === 'punch' ? 9 : 14)), 0, 100);
-        if (!blocking) { other.action = 'hurt'; other.actionUntil = now + 180; }
+        other.hitSerial++;
+        if (!blocking) { other.action = other.hp <= 0 ? 'ko' : 'hurt'; other.actionStart = now; other.actionDuration = other.hp <= 0 ? 1100 : 310; other.actionUntil = now + other.actionDuration; }
       }
       p.hitDone = true;
     }
